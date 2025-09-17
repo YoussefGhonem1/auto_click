@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "239306807047",
+    "project_id": "auto-task-22f43",
+    "storage_bucket": "auto-task-22f43.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:239306807047:android:86fed33fde5d29a13357a2",
+        "android_client_info": {
+          "package_name": "com.auto.tasks"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUI0m6kshA9zx-0IUsE1TjOMJQ5ruSuO0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
