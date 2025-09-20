@@ -2,7 +2,6 @@
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../domain/models/task.dart';
 import '../../domain/services/task_service.dart';
 import '../../domain/services/task_execution_service.dart';
@@ -18,7 +17,6 @@ class TaskExecutionController extends ChangeNotifier {
   bool _isExecutingTasks = false;
   Task? _currentExecutingTask;
   String _executionStatus = 'In waiting for tasks';
-  final int _maxRetryAttempts = 3;
   Completer<void>? _executionCompleter;
 
   // Metrics
@@ -30,7 +28,6 @@ class TaskExecutionController extends ChangeNotifier {
   Task? get currentExecutingTask => _currentExecutingTask;
   String get executionStatus => _executionStatus;
   bool get isCurrentlyExecuting => _currentExecutingTask != null;
-  // **FIXED**: Re-added the taskService getter
   TaskService get taskService => _taskService;
 
 
@@ -70,15 +67,13 @@ class TaskExecutionController extends ChangeNotifier {
     onShowMessage?.call('Task execution enabled', isError: false);
     onExecutionToggled?.call();
   }
-
-  // **FIXED**: Re-added resumeTaskExecution method
+  
   Future<void> resumeTaskExecution() async {
     if (!_isExecutingTasks) {
      await toggleTaskExecution();
     }
   }
 
-  // **FIXED**: Re-added terminateCurrentTask method
   Future<void> terminateCurrentTask() async {
     if (_isExecutingTasks && _currentExecutingTask != null) {
       final taskToCancel = _currentExecutingTask!;
@@ -99,7 +94,6 @@ class TaskExecutionController extends ChangeNotifier {
     }
   }
 
-  // **FIXED**: Re-added reloadGestureConfigurations method
   Future<void> reloadGestureConfigurations() async {
     try {
       await _taskExecutionService.reloadGestureConfigurations();
@@ -129,6 +123,7 @@ class TaskExecutionController extends ChangeNotifier {
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt)); // Oldest first is correct
   }
 
+  /// **(FINAL & CORRECTED)** Executes the queue with the new "Smart Swap" combination logic.
   Future<void> _executeTaskQueue(List<Task> tasks) async {
     _executionCompleter = Completer<void>();
     _tasksExecutedCount = 0;
@@ -140,16 +135,22 @@ class TaskExecutionController extends ChangeNotifier {
         final firstTask = workingTasks.first;
         Task? partnerTask;
 
-        if (firstTask.type == 'watch') {
-          for (final potentialPartner in workingTasks) {
-            if (potentialPartner.id != firstTask.id &&
-                potentialPartner.type == 'watch' &&
-                potentialPartner.data['videoUrl'] == firstTask.data['videoUrl']) {
-              partnerTask = potentialPartner;
-              break; 
-            }
-          }
-        }
+         // **SMART SWAP COMBINATION LOGIC**
+         if (firstTask.type == 'watch') {
+           // Start searching for a partner from the task that comes *after* the first one.
+           for (final potentialPartner in workingTasks) {
+             if (potentialPartner.id == firstTask.id) continue; // Skip the task itself.
+
+             // The partner must be a watch task.
+             if (potentialPartner.type == 'watch') {
+               // **SMART SWAP RULE**: The video URL must be DIFFERENT for Smart Swap optimization
+               if (potentialPartner.data['videoUrl'] != firstTask.data['videoUrl']) {
+                 partnerTask = potentialPartner;
+                 break; // Found the first suitable partner, stop searching.
+               }
+             }
+           }
+         }
 
         final success = await _executeSingleTaskWithRetry(firstTask, partnerTask);
 
@@ -181,7 +182,7 @@ class TaskExecutionController extends ChangeNotifier {
     _currentExecutingTask = task;
     _updateExecutionStatus('Executing: ${_getTaskTypeText(task.type)}${otherTask != null ? ' (and another)' : ''}');
 
-    for (int attempt = 1; attempt <= _maxRetryAttempts; attempt++) {
+    for (int attempt = 1; attempt <= 3; attempt++) {
       try {
         await updateTaskStatusSafely(task.id, 'in_progress');
         if (otherTask != null) {
@@ -191,7 +192,7 @@ class TaskExecutionController extends ChangeNotifier {
         final success = await _taskExecutionService.executeTask(task, otherTask);
         if (success) return true;
 
-        if (attempt < _maxRetryAttempts) await _delayBeforeRetry(attempt);
+        if (attempt < 3) await _delayBeforeRetry(attempt);
       } catch (e) {
         debugPrint('Task execution attempt $attempt failed: $e');
       }
@@ -199,32 +200,44 @@ class TaskExecutionController extends ChangeNotifier {
     return false;
   }
 
-  Future<void> _handleTaskSuccess(Task task, Task? otherTask) async {
-    if (task.type == 'watch' && otherTask != null) {
-      final combinationService = TaskCombinationService();
-      final result = combinationService.calculate(task, otherTask);
+   Future<void> _handleTaskSuccess(Task task, Task? otherTask) async {
+     if (otherTask != null) {
+       // Combined execution (Smart Swap)
+       final combinationService = TaskCombinationService();
+       final result = combinationService.calculate(task, otherTask);
 
-      await updateTaskStatusSafely(result.completedTask.id, 'completed');
-      await updateTaskStatusSafely(result.partialTask.id, 'completed');
+       // Mark both tasks as completed
+       await updateTaskStatusSafely(task.id, 'completed');
+       await updateTaskStatusSafely(otherTask.id, 'completed');
 
-      if (result.hasRemainder) {
-        await _taskService.createRemainderTask(
-          originalTask: result.partialTask,
-          remainingCount: result.remainderCount,
-        );
-      }
-      _tasksExecutedCount += 2;
-    } else {
-      await updateTaskStatusSafely(task.id, 'completed');
-      _tasksExecutedCount++;
-    }
+       // Create remainder task if needed
+       if (result.hasRemainder && result.taskWithRemainder != null) {
+         await _taskService.createRemainderTask(
+           originalTask: result.taskWithRemainder!,
+           remainingCount: result.remainderCount,
+         );
+       }
 
-    onTaskCompleted?.call(task, true);
-    if (otherTask != null) onTaskCompleted?.call(otherTask, true);
-
-    onShowMessage?.call(
-        'Task completed: ${_getTaskTypeText(task.type)}', isError: false);
-  }
+       _tasksExecutedCount += 2;
+       onTaskCompleted?.call(task, true);
+       onTaskCompleted?.call(otherTask, true);
+       
+       onShowMessage?.call(
+         'Smart Swap completed: ${_getTaskTypeText(task.type)} + ${_getTaskTypeText(otherTask.type)}', 
+         isError: false
+       );
+     } else {
+       // Single task execution
+       await updateTaskStatusSafely(task.id, 'completed');
+       _tasksExecutedCount++;
+       onTaskCompleted?.call(task, true);
+       
+       onShowMessage?.call(
+         'Task completed: ${_getTaskTypeText(task.type)}', 
+         isError: false
+       );
+     }
+   }
 
   Future<void> _handleTaskFailure(Task task, [Task? otherTask]) async {
     await updateTaskStatusSafely(task.id, 'failed');
@@ -232,17 +245,16 @@ class TaskExecutionController extends ChangeNotifier {
         await updateTaskStatusSafely(otherTask.id, 'failed');
     }
     _tasksFailedCount++;
-
+    
     onTaskCompleted?.call(task, false);
     if(otherTask != null) onTaskCompleted?.call(otherTask, false);
-
+    
     onShowMessage?.call(
       'Task execution failed: ${_getTaskTypeText(task.type)}',
       isError: true,
     );
   }
-
-  // **FIXED**: Made public to be accessible from other controllers.
+  
   Future<bool> updateTaskStatusSafely(String taskId, String status) async {
     try {
       return await _taskService.updateTaskStatus(taskId, status);
