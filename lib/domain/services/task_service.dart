@@ -153,4 +153,32 @@ class TaskService {
               .toList();
         });
   }
+
+  // In lib/domain/services/task_service.dart
+// Add this NEW function inside the TaskService class.
+
+Future<void> createRemainderTask({
+  required Task originalTask,
+  required int remainingCount,
+}) async {
+  try {
+    final newTaskData = originalTask.toMap();
+
+    // Update fields for the new remainder task
+    newTaskData['data']['numberOfWatches'] = remainingCount;
+    newTaskData['status'] = 'pending';
+    newTaskData['inProgress'] = false;
+    // This is crucial: set a new timestamp to place it at the end of the queue
+    newTaskData['createdAt'] = FieldValue.serverTimestamp();
+    newTaskData['originalTaskId'] = originalTask.id;
+
+    // Remove the old ID so Firestore generates a new one
+    newTaskData.remove('id');
+
+    await _firestore.collection(_tasksCollection).add(newTaskData);
+  } catch (e) {
+    print('Error creating remainder task: $e');
+    rethrow;
+  }
+}
 }
