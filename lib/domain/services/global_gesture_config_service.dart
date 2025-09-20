@@ -26,13 +26,12 @@ class GlobalGestureConfigService {
   bool get _isCacheValid =>
       _lastCacheUpdate != null &&
       DateTime.now().difference(_lastCacheUpdate!) < _cacheValidityDuration;
-
-  /// Load global gesture positions from Firestore
+/// Load global gesture positions from Firestore
   Future<Map<String, dynamic>> loadGlobalGesturePositions() async {
     // Return cached data if valid
-    if (_isCacheValid && _cachedGlobalPositions != null) {
-      return Map<String, dynamic>.from(_cachedGlobalPositions!);
-    }
+    // if (_isCacheValid && _cachedGlobalPositions != null) {
+    //   return Map<String, dynamic>.from(_cachedGlobalPositions!);
+    // }
 
     try {
       final doc = await _firestore
