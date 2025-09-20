@@ -178,8 +178,8 @@ class TaskExecutionController extends ChangeNotifier {
       final hasValidData = _validateTaskData(task);
       return isExecutable && hasValidData;
     }).toList()..sort((a, b) {
-      // First sort by datetime (createdAt) - latest first
-      final dateComparison = b.createdAt.compareTo(a.createdAt);
+      // First sort by datetime (createdAt) - OLDEST first (highest priority)
+      final dateComparison = a.createdAt.compareTo(b.createdAt);
       if (dateComparison != 0) return dateComparison;
 
       // Then sort by inProgress status (false first, true last)
@@ -226,68 +226,71 @@ class TaskExecutionController extends ChangeNotifier {
 
       final workingTasks = List<Task>.from(tasks);
 
-      // Pre-process to identify and prioritize combinable watch tasks
-      int nextTaskIndex = _findNextExecutableTaskIndex(workingTasks);
+      // CONTINUOUS PROCESSING LOOP - Process all tasks until queue is empty
+      while (workingTasks.isNotEmpty && _isExecutingTasks) {
+        // Find the next executable task (oldest first due to sorting)
+        int nextTaskIndex = _findNextExecutableTaskIndex(workingTasks);
 
-      if (nextTaskIndex == -1) {
-        // No more executable tasks, break the loop
-        return;
-      }
+        if (nextTaskIndex == -1) {
+          // No more executable tasks, break the loop
+          break;
+        }
 
-      final task = workingTasks[nextTaskIndex];
-      final success = await _executeSingleTaskWithRetry(task, workingTasks);
+        final task = workingTasks[nextTaskIndex];
+        final success = await _executeSingleTaskWithRetry(task, workingTasks);
 
-      if (success) {
-        _tasksExecutedCount++;
-        await _handleTaskSuccess(task, workingTasks);
+        if (success) {
+          _tasksExecutedCount++;
+          await _handleTaskSuccess(task, workingTasks);
 
-        // For combined tasks, we need to handle both tasks
-        final combinedTask = _findCombinedTaskInProgress(task, workingTasks);
-        if (combinedTask != null) {
-          // Remove both tasks from working list since they're both completed
-          final combinedIndex = workingTasks.indexWhere(
-            (t) => t.id == combinedTask.id,
-          );
-          if (combinedIndex != -1) {
-            workingTasks.removeAt(combinedIndex);
-            // Adjust nextTaskIndex if necessary
-            if (combinedIndex < nextTaskIndex) {
-              nextTaskIndex--;
+          // For combined tasks, we need to handle both tasks
+          final combinedTask = _findCombinedTaskInProgress(task, workingTasks);
+          if (combinedTask != null) {
+            // Remove both tasks from working list since they're both completed
+            final combinedIndex = workingTasks.indexWhere(
+              (t) => t.id == combinedTask.id,
+            );
+            if (combinedIndex != -1) {
+              workingTasks.removeAt(combinedIndex);
+              // Adjust nextTaskIndex if necessary
+              if (combinedIndex < nextTaskIndex) {
+                nextTaskIndex--;
+              }
             }
-          }
-          workingTasks.removeAt(nextTaskIndex);
-        } else {
-          // Single task - remove if fully completed
-          if (await _isTaskFullyCompleted(task, workingTasks)) {
             workingTasks.removeAt(nextTaskIndex);
-          }
-        }
-      } else {
-        _tasksFailedCount++;
-        await _handleTaskFailure(task, workingTasks);
-
-        // For combined tasks, remove both from working list
-        final combinedTask = _findCombinedTaskInProgress(task, workingTasks);
-        if (combinedTask != null) {
-          final combinedIndex = workingTasks.indexWhere(
-            (t) => t.id == combinedTask.id,
-          );
-          if (combinedIndex != -1) {
-            workingTasks.removeAt(combinedIndex);
-            // Adjust nextTaskIndex if necessary
-            if (combinedIndex < nextTaskIndex) {
-              nextTaskIndex--;
+          } else {
+            // Single task - remove if fully completed
+            if (await _isTaskFullyCompleted(task, workingTasks)) {
+              workingTasks.removeAt(nextTaskIndex);
             }
           }
+        } else {
+          _tasksFailedCount++;
+          await _handleTaskFailure(task, workingTasks);
+
+          // For combined tasks, remove both from working list
+          final combinedTask = _findCombinedTaskInProgress(task, workingTasks);
+          if (combinedTask != null) {
+            final combinedIndex = workingTasks.indexWhere(
+              (t) => t.id == combinedTask.id,
+            );
+            if (combinedIndex != -1) {
+              workingTasks.removeAt(combinedIndex);
+              // Adjust nextTaskIndex if necessary
+              if (combinedIndex < nextTaskIndex) {
+                nextTaskIndex--;
+              }
+            }
+          }
+
+          // Remove failed task from working list to prevent infinite retry
+          workingTasks.removeAt(nextTaskIndex);
         }
 
-        // Remove failed task from working list to prevent infinite retry
-        workingTasks.removeAt(nextTaskIndex);
-      }
-
-      // Add delay between tasks to prevent overwhelming the system
-      if (workingTasks.isNotEmpty && _isExecutingTasks) {
-        await _delayBetweenTasks();
+        // Add delay between tasks to prevent overwhelming the system
+        if (workingTasks.isNotEmpty && _isExecutingTasks) {
+          await _delayBetweenTasks();
+        }
       }
 
       await _handleQueueCompletion();
@@ -502,13 +505,24 @@ class TaskExecutionController extends ChangeNotifier {
 
   /// Handle task execution success with improved status management
   Future<void> _handleTaskSuccess(Task task, List<Task> allTasks) async {
-    // For watch tasks, we need to handle the watch count logic
+    // For watch tasks, check if this was a combined execution
     if (task.type == 'watch') {
-      await _handleWatchTaskSuccess(task, allTasks);
+      final combinedTask = _findCombinedTaskInProgress(task, allTasks);
+
+      if (combinedTask != null) {
+        // This was a combined execution - handle both tasks
+        await _handleCombinedWatchTaskSuccess(task, combinedTask, allTasks);
+      } else {
+        // Single watch task execution
+        await _updateTaskStatusSafely(task.id, 'completed');
+        final taskIndex = allTasks.indexWhere((t) => t.id == task.id);
+        if (taskIndex != -1) {
+          allTasks[taskIndex] = task.copyWith(status: 'completed');
+        }
+      }
     } else {
       // For non-watch tasks, simply mark as completed
       await _updateTaskStatusSafely(task.id, 'completed');
-      // Update the task in the list
       final taskIndex = allTasks.indexWhere((t) => t.id == task.id);
       if (taskIndex != -1) {
         allTasks[taskIndex] = task.copyWith(status: 'completed');
@@ -520,24 +534,6 @@ class TaskExecutionController extends ChangeNotifier {
       'Task completed: ${_getTaskTypeText(task.type)}',
       isError: false,
     );
-  }
-
-  /// Handle watch task success with new combination and remainder logic
-  Future<void> _handleWatchTaskSuccess(Task task, List<Task> allTasks) async {
-    // Check if this was a combined execution by looking for the combined task
-    final combinedTask = _findCombinedTaskInProgress(task, allTasks);
-
-    if (combinedTask != null) {
-      // This was a combined execution - implement new behavior
-      await _handleCombinedWatchTaskSuccess(task, combinedTask, allTasks);
-    } else {
-      // Single watch task execution
-      await _updateTaskStatusSafely(task.id, 'completed');
-      final taskIndex = allTasks.indexWhere((t) => t.id == task.id);
-      if (taskIndex != -1) {
-        allTasks[taskIndex] = task.copyWith(status: 'completed');
-      }
-    }
   }
 
   /// Find the combined task that was executed with the primary task
@@ -584,15 +580,20 @@ class TaskExecutionController extends ChangeNotifier {
       allTasks[combinedIndex] = combinedTask.copyWith(status: 'completed');
     }
 
-    // Create remainder task if there's a remainder from the combined task
-    if (combinedRemainder > 0) {
-      await _createRemainderTask(combinedTask, combinedRemainder, allTasks);
+    // Create remainder task ONLY for the task with the larger count
+    // This follows the specification: create ONE remainder task at the end of queue
+    if (combinedWatches > primaryWatches) {
+      // Combined task had more watches, create remainder for it
+      if (combinedRemainder > 0) {
+        await _createRemainderTask(combinedTask, combinedRemainder, allTasks);
+      }
+    } else if (primaryWatches > combinedWatches) {
+      // Primary task had more watches, create remainder for it
+      if (primaryRemainder > 0) {
+        await _createRemainderTask(primaryTask, primaryRemainder, allTasks);
+      }
     }
-
-    // Create remainder task if there's a remainder from the primary task
-    if (primaryRemainder > 0) {
-      await _createRemainderTask(primaryTask, primaryRemainder, allTasks);
-    }
+    // If equal counts, no remainder task needed
   }
 
   /// Create a remainder task and add it to the end of the queue
