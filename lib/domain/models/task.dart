@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Task {
   final String id;
   final String type;
@@ -33,22 +35,40 @@ class Task {
     };
   }
 
-  // Create from Firestore document
-  factory Task.fromMap(Map<String, dynamic> map, String documentId) {
-    return Task(
-      id: documentId,
-      type: map['type'] ?? '',
-      data: Map<String, dynamic>.from(map['data'] ?? {}),
-      createdAt: DateTime.parse(
-        map['createdAt'] ?? DateTime.now().toIso8601String(),
-      ),
-      status: map['status'] ?? 'pending',
-      assignedTo: map['assignedTo'],
-      progress: map['progress'] ?? 0,
-      inProgress: map['inProgress'] ?? false,
-    );
+
+factory Task.fromMap(Map<String, dynamic> map, String documentId) {
+  // This is a robust helper function to safely parse timestamps.
+  DateTime _parseTimestamp(dynamic value) {
+    if (value == null) {
+      return DateTime.now(); // Fallback if createdAt is missing.
+    }
+    if (value is Timestamp) {
+      // Handles new data stored correctly as a Timestamp.
+      return value.toDate();
+    } else if (value is String) {
+      // Handles old data stored as a String.
+      try {
+        return DateTime.parse(value);
+      } catch (e) {
+        print('Error parsing date string: $value. Error: $e');
+        return DateTime.now(); // Fallback if parsing fails.
+      }
+    }
+    // Fallback for any other unexpected type.
+    return DateTime.now();
   }
 
+  return Task(
+    id: documentId,
+    type: map['type'] as String? ?? '',
+    data: Map<String, dynamic>.from(map['data'] ?? {}),
+    createdAt: _parseTimestamp(map['createdAt']), // Use the robust helper
+    status: map['status'] as String? ?? 'pending',
+    assignedTo: map['assignedTo'] as String?,
+    progress: (map['progress'] as num?)?.toDouble() ?? 0.0,
+    inProgress: map['inProgress'] as bool? ?? false,
+  );
+}
   Task copyWith({
     String? id,
     String? type,

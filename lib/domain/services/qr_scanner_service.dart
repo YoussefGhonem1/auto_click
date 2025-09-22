@@ -367,14 +367,15 @@ class _ServerRegistrationQRScannerDialogState
         child: Column(
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Scan QR Code to Add Server',
                   style: AppTextStyles.heading1.copyWith(
                     color: theme.colorScheme.primary,
+                    fontSize: 18,
                   ),
                 ),
-                const Spacer(),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.close),

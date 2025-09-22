@@ -219,7 +219,12 @@ class _RoleBasedHomePageState extends State<RoleBasedHomePage> {
         foregroundColor: colorScheme.onSurface,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.only(
+          right: 24,
+          left: 24,
+          top: 24,
+          bottom: 16,
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -284,9 +289,14 @@ class _RoleBasedHomePageState extends State<RoleBasedHomePage> {
                 style: TextStyle(color: colorScheme.primary),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.only(
+                right: 10,
+                left: 10,
+                top: 10,
+                bottom: 8,
+              ),
               decoration: BoxDecoration(
                 color: AppColors.getInfoColor(context).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
@@ -295,6 +305,7 @@ class _RoleBasedHomePageState extends State<RoleBasedHomePage> {
                 ),
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     Icons.info_outline,
@@ -319,7 +330,8 @@ class _RoleBasedHomePageState extends State<RoleBasedHomePage> {
                       color: AppColors.getInfoColor(context),
                       fontSize: 14,
                     ),
-                    textAlign: TextAlign.right,
+                    textDirection: TextDirection.ltr,
+                    textAlign: TextAlign.left,
                   ),
                 ],
               ),
