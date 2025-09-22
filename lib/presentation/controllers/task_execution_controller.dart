@@ -123,6 +123,70 @@ class TaskExecutionController extends ChangeNotifier {
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt)); // Oldest first is correct
   }
 
+  /// Decide the next best execution batch (one task or a pair) based on priority rules
+  List<Task> _planNextExecutionBatch(List<Task> available) {
+    if (available.isEmpty) return const [];
+
+    // Separate by priority
+    final List<Task> highPriorityTasks = available
+        .where((t) => (t.status.toLowerCase() == 'pending' || t.status.toLowerCase() == 'assigned') && t.priority == TaskPriority.high)
+        .toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    final List<Task> normalPriorityTasks = available
+        .where((t) => (t.status.toLowerCase() == 'pending' || t.status.toLowerCase() == 'assigned') && t.priority == TaskPriority.normal)
+        .toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    // Helper to find first combinable pair in a list (different videoUrl, type watch)
+    List<Task> _findPair(List<Task> list) {
+      for (int i = 0; i < list.length; i++) {
+        final a = list[i];
+        if (a.type != 'watch') continue;
+        final aUrl = a.data['videoUrl'];
+        for (int j = i + 1; j < list.length; j++) {
+          final b = list[j];
+          if (b.type != 'watch') continue;
+          final bUrl = b.data['videoUrl'];
+          if (aUrl != null && bUrl != null && aUrl != bUrl) {
+            return [a, b];
+          }
+        }
+      }
+      return const [];
+    }
+
+    // Case A: 2+ high-priority tasks → try to combine within the list
+    if (highPriorityTasks.length >= 2) {
+      final pair = _findPair(highPriorityTasks);
+      if (pair.isNotEmpty) return pair;
+    }
+
+    // Case B: exactly 1 high-priority → try to pair with normal, else single
+    if (highPriorityTasks.length == 1) {
+      final hp = highPriorityTasks.first;
+      if (hp.type == 'watch') {
+        final hpUrl = hp.data['videoUrl'];
+        for (final np in normalPriorityTasks) {
+          if (np.type == 'watch' && np.data['videoUrl'] != null && np.data['videoUrl'] != hpUrl) {
+            return [hp, np];
+          }
+        }
+      }
+      return [hp];
+    }
+
+    // Case C: no high-priority → try to combine within normal, else single oldest
+    if (highPriorityTasks.isEmpty && normalPriorityTasks.isNotEmpty) {
+      final pair = _findPair(normalPriorityTasks);
+      if (pair.isNotEmpty) return pair;
+      return [normalPriorityTasks.first];
+    }
+
+    // Case D: nothing to do
+    return const [];
+  }
+
   /// **(FINAL & CORRECTED)** Executes the queue with the new "Smart Swap" combination logic.
   Future<void> _executeTaskQueue(List<Task> tasks) async {
     _executionCompleter = Completer<void>();
@@ -132,36 +196,23 @@ class TaskExecutionController extends ChangeNotifier {
       final workingTasks = List<Task>.from(tasks);
 
       while (workingTasks.isNotEmpty && _isExecutingTasks) {
-        final firstTask = workingTasks.first;
-        Task? partnerTask;
+        final plan = _planNextExecutionBatch(workingTasks);
+        if (plan.isEmpty) break;
 
-         // **SMART SWAP COMBINATION LOGIC**
-         if (firstTask.type == 'watch') {
-           // Start searching for a partner from the task that comes *after* the first one.
-           for (final potentialPartner in workingTasks) {
-             if (potentialPartner.id == firstTask.id) continue; // Skip the task itself.
+        final primary = plan.first;
+        final partner = plan.length > 1 ? plan[1] : null;
 
-             // The partner must be a watch task.
-             if (potentialPartner.type == 'watch') {
-               // **SMART SWAP RULE**: The video URL must be DIFFERENT for Smart Swap optimization
-               if (potentialPartner.data['videoUrl'] != firstTask.data['videoUrl']) {
-                 partnerTask = potentialPartner;
-                 break; // Found the first suitable partner, stop searching.
-               }
-             }
-           }
-         }
-
-        final success = await _executeSingleTaskWithRetry(firstTask, partnerTask);
+        final success = await _executeSingleTaskWithRetry(primary, partner);
 
         if (success) {
-          await _handleTaskSuccess(firstTask, partnerTask);
+          await _handleTaskSuccess(primary, partner);
         } else {
-          await _handleTaskFailure(firstTask, partnerTask);
+          await _handleTaskFailure(primary, partner);
         }
 
+        // Remove executed tasks from working list
         workingTasks.removeWhere((t) =>
-            t.id == firstTask.id || (partnerTask != null && t.id == partnerTask.id));
+            t.id == primary.id || (partner != null && t.id == partner.id));
 
         if (workingTasks.isNotEmpty && _isExecutingTasks) {
           await _delayBetweenTasks();

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+enum TaskPriority { high, normal }
+
 class Task {
   final String id;
   final String type;
@@ -9,6 +11,7 @@ class Task {
   final String? assignedTo;
   final double progress;
   final bool inProgress;
+  final TaskPriority priority;
 
   const Task({
     required this.id,
@@ -19,6 +22,7 @@ class Task {
     this.assignedTo,
     this.progress = 0,
     this.inProgress = false,
+    this.priority = TaskPriority.high,
   });
 
   // Convert to Firestore document
@@ -32,6 +36,7 @@ class Task {
       'assignedTo': assignedTo,
       'progress': progress,
       'inProgress': inProgress,
+      'priority': priority.name,
     };
   }
 
@@ -67,7 +72,21 @@ factory Task.fromMap(Map<String, dynamic> map, String documentId) {
     assignedTo: map['assignedTo'] as String?,
     progress: (map['progress'] as num?)?.toDouble() ?? 0.0,
     inProgress: map['inProgress'] as bool? ?? false,
+    priority: _parsePriority(map['priority']),
   );
+}
+
+static TaskPriority _parsePriority(dynamic value) {
+  if (value is String) {
+    switch (value.toLowerCase()) {
+      case 'normal':
+        return TaskPriority.normal;
+      case 'high':
+      default:
+        return TaskPriority.high;
+    }
+  }
+  return TaskPriority.high;
 }
   Task copyWith({
     String? id,
@@ -78,6 +97,7 @@ factory Task.fromMap(Map<String, dynamic> map, String documentId) {
     String? assignedTo,
     double? progress,
     bool? inProgress,
+    TaskPriority? priority,
   }) {
     return Task(
       id: id ?? this.id,
@@ -88,6 +108,7 @@ factory Task.fromMap(Map<String, dynamic> map, String documentId) {
       assignedTo: assignedTo ?? this.assignedTo,
       progress: progress ?? this.progress,
       inProgress: inProgress ?? this.inProgress,
+      priority: priority ?? this.priority,
     );
   }
 
@@ -112,10 +133,11 @@ factory Task.fromMap(Map<String, dynamic> map, String documentId) {
       status.hashCode ^
       assignedTo.hashCode ^
       progress.hashCode ^
-      inProgress.hashCode;
+      inProgress.hashCode ^
+      priority.hashCode;
 
   @override
   String toString() {
-    return 'Task{id: $id, type: $type, createdAt: $createdAt, status: $status, assignedTo: $assignedTo, progress: $progress, inProgress: $inProgress}';
+    return 'Task{id: $id, type: $type, createdAt: $createdAt, status: $status, assignedTo: $assignedTo, progress: $progress, inProgress: $inProgress, priority: $priority}';
   }
 }

@@ -93,8 +93,6 @@ class TaskController {
       }
 
       final List<String> createdTaskIds = [];
-
-      // Distribute comments among servers
       final distributions = _distributeTasksAmongServers(
         availableServers,
         comments.length,
@@ -102,6 +100,7 @@ class TaskController {
       );
 
       int commentIndex = 0;
+      bool isFirst = true;
       for (final distribution in distributions) {
         final serverComments = comments
             .skip(commentIndex)
@@ -110,7 +109,7 @@ class TaskController {
         commentIndex += distribution.count;
 
         final task = Task(
-          id: '', // Firestore will generate the ID
+          id: '',
           type: 'comment',
           data: {
             'videoUrl': videoUrl,
@@ -119,9 +118,11 @@ class TaskController {
           },
           createdAt: DateTime.now(),
           status: 'pending',
+          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
           assignedTo: distribution.serverUid,
         );
 
+        isFirst = false;
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -131,8 +132,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -153,11 +152,9 @@ class TaskController {
         throw Exception('No servers available at the moment');
       }
 
-      // Get max operations per task for watches
       final maxOperationsPerTask =
           await TaskCalculationService.calculateMaxWatchOperations();
 
-      // Split tasks if they exceed maxTaskDuration
       final taskSplits = _splitTasksByDuration(
         'watch',
         numberOfWatches,
@@ -165,18 +162,18 @@ class TaskController {
       );
 
       final List<String> createdTaskIds = [];
+      bool isFirst = true;
 
       for (final split in taskSplits) {
-        // Distribute this split among servers
         final distributions = _distributeTasksAmongServers(
           availableServers,
           split.count,
-          null, // No max limit for watches
+          null,
         );
 
         for (final distribution in distributions) {
           final task = Task(
-            id: '', // Firestore will generate the ID
+            id: '',
             type: 'watch',
             data: {
               'videoUrl': videoUrl,
@@ -185,9 +182,11 @@ class TaskController {
             },
             createdAt: DateTime.now(),
             status: 'pending',
+            priority: isFirst ? TaskPriority.high : TaskPriority.normal,
             assignedTo: distribution.serverUid,
           );
 
+          isFirst = false;
           final taskId = await _taskService.createTask(task);
           if (taskId != null) {
             createdTaskIds.add(taskId);
@@ -198,8 +197,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -220,11 +217,9 @@ class TaskController {
         throw Exception('No servers available at the moment');
       }
 
-      // Get max operations per task for shares
       final maxOperationsPerTask =
           await TaskCalculationService.calculateMaxShareOperations();
 
-      // Split tasks if they exceed maxTaskDuration
       final taskSplits = _splitTasksByDuration(
         'share',
         numberOfShares,
@@ -232,18 +227,18 @@ class TaskController {
       );
 
       final List<String> createdTaskIds = [];
+      bool isFirst = true;
 
       for (final split in taskSplits) {
-        // Distribute this split among servers
         final distributions = _distributeTasksAmongServers(
           availableServers,
           split.count,
-          null, // No max limit for shares
+          null,
         );
 
         for (final distribution in distributions) {
           final task = Task(
-            id: '', // Firestore will generate the ID
+            id: '',
             type: 'share',
             data: {
               'videoUrl': videoUrl,
@@ -252,9 +247,11 @@ class TaskController {
             },
             createdAt: DateTime.now(),
             status: 'pending',
+            priority: isFirst ? TaskPriority.high : TaskPriority.normal,
             assignedTo: distribution.serverUid,
           );
 
+          isFirst = false;
           final taskId = await _taskService.createTask(task);
           if (taskId != null) {
             createdTaskIds.add(taskId);
@@ -265,8 +262,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -288,17 +283,16 @@ class TaskController {
       }
 
       final List<String> createdTaskIds = [];
-
-      // Distribute likes among servers
       final distributions = _distributeTasksAmongServers(
         availableServers,
         numberOfLikes,
-        8, // Max 8 likes per server
+        8,
       );
 
+      bool isFirst = true;
       for (final distribution in distributions) {
         final task = Task(
-          id: '', // Firestore will generate the ID
+          id: '',
           type: 'like',
           data: {
             'videoUrl': videoUrl,
@@ -307,9 +301,11 @@ class TaskController {
           },
           createdAt: DateTime.now(),
           status: 'pending',
+          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
           assignedTo: distribution.serverUid,
         );
 
+        isFirst = false;
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -319,8 +315,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -342,17 +336,16 @@ class TaskController {
       }
 
       final List<String> createdTaskIds = [];
-
-      // Distribute favorites among servers
       final distributions = _distributeTasksAmongServers(
         availableServers,
         numberOfFavorites,
-        8, // Max 8 favorites per server
+        8,
       );
 
+      bool isFirst = true;
       for (final distribution in distributions) {
         final task = Task(
-          id: '', // Firestore will generate the ID
+          id: '',
           type: 'favorite',
           data: {
             'videoUrl': videoUrl,
@@ -361,9 +354,11 @@ class TaskController {
           },
           createdAt: DateTime.now(),
           status: 'pending',
+          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
           assignedTo: distribution.serverUid,
         );
 
+        isFirst = false;
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -373,8 +368,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -397,17 +390,16 @@ class TaskController {
       }
 
       final List<String> createdTaskIds = [];
-
-      // Distribute accounts among servers
       final distributions = _distributeTasksAmongServers(
         availableServers,
         numberOfAccounts,
-        8, // Max 8 accounts per server
+        8,
       );
 
+      bool isFirst = true;
       for (final distribution in distributions) {
         final task = Task(
-          id: '', // Firestore will generate the ID
+          id: '',
           type: 'direct_message',
           data: {
             'action': 'direct_message',
@@ -417,9 +409,11 @@ class TaskController {
           },
           createdAt: DateTime.now(),
           status: 'pending',
+          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
           assignedTo: distribution.serverUid,
         );
 
+        isFirst = false;
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -429,8 +423,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }
@@ -452,8 +444,8 @@ class TaskController {
       }
 
       final List<String> createdTaskIds = [];
+      bool isFirst = true;
 
-      // Create one task per server for simple URL-based tasks
       for (final serverUid in availableServers) {
         final task = Task(
           id: '',
@@ -461,9 +453,11 @@ class TaskController {
           data: {'videoUrl': videoUrl, 'action': taskType},
           createdAt: DateTime.now(),
           status: 'pending',
+          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
           assignedTo: serverUid,
         );
 
+        isFirst = false;
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -473,8 +467,6 @@ class TaskController {
       }
 
       return createdTaskIds;
-    } catch (e) {
-      rethrow;
     } finally {
       _isCreatingTask = false;
     }

@@ -167,6 +167,7 @@ class TaskService {
         createdAt: DateTime.now(), // New timestamp for deprioritization
         status: 'pending',
         assignedTo: originalTask.assignedTo,
+        priority: TaskPriority.normal,
       );
 
       return await createTask(remainderTask);
