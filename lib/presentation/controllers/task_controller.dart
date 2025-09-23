@@ -23,7 +23,6 @@ class TaskController {
     }
   }
 
-  /// Distribute tasks among servers with consideration for max operations per task
   List<ServerDistribution> _distributeTasksAmongServers(
     List<String> servers,
     int totalCount,
@@ -38,10 +37,9 @@ class TaskController {
 
     for (int i = 0; i < serverCount; i++) {
       int count = baseCount;
-      if (i == 0) {
-        count += remainder;
+      if (i < remainder) { // توزيع أكثر عدلاً للباقي
+        count++;
       }
-      // Respect maxPerServer if specified
       if (maxPerServer != null && count > maxPerServer) {
         count = maxPerServer;
       }
@@ -77,35 +75,30 @@ class TaskController {
     return splits;
   }
 
-  /// Create and distribute comment tasks among servers
-  Future<List<String>> executeCommentTask(
+Future<List<String>> executeCommentTask(
     String videoUrl,
     List<String> comments,
   ) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
       if (availableServers.isEmpty) {
         throw Exception('No servers available at the moment');
       }
 
-      final List<String> createdTaskIds = [];
+      final createdTaskIds = <String>[];
       final distributions = _distributeTasksAmongServers(
         availableServers,
         comments.length,
-        8, // Max 8 comments per server
+        8,
       );
 
       int commentIndex = 0;
-      bool isFirst = true;
+      bool isFirstTaskInAction = true; // تعديل: متغير محلي
       for (final distribution in distributions) {
-        final serverComments = comments
-            .skip(commentIndex)
-            .take(distribution.count)
-            .toList();
+        final serverComments =
+            comments.skip(commentIndex).take(distribution.count).toList();
         commentIndex += distribution.count;
 
         final task = Task(
@@ -118,11 +111,10 @@ class TaskController {
           },
           createdAt: DateTime.now(),
           status: 'pending',
-          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
+          priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
           assignedTo: distribution.serverUid,
         );
-
-        isFirst = false;
+        isFirstTaskInAction = false; // يتم تعيينها false بعد أول مهمة
         final taskId = await _taskService.createTask(task);
         if (taskId != null) {
           createdTaskIds.add(taskId);
@@ -130,22 +122,19 @@ class TaskController {
           throw Exception('Failed to create task');
         }
       }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;
     }
   }
 
-  /// Create and distribute watch tasks among servers with duration consideration
+
   Future<List<String>> executeWatchTask(
     String videoUrl,
     int numberOfWatches,
   ) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
       if (availableServers.isEmpty) {
@@ -154,16 +143,14 @@ class TaskController {
 
       final maxOperationsPerTask =
           await TaskCalculationService.calculateMaxWatchOperations();
-
       final taskSplits = _splitTasksByDuration(
         'watch',
         numberOfWatches,
         maxOperationsPerTask,
       );
 
-      final List<String> createdTaskIds = [];
-      bool isFirst = true;
-
+      final createdTaskIds = <String>[];
+      bool isFirstTaskInAction = true; // تعديل: متغير محلي
       for (final split in taskSplits) {
         final distributions = _distributeTasksAmongServers(
           availableServers,
@@ -182,11 +169,10 @@ class TaskController {
             },
             createdAt: DateTime.now(),
             status: 'pending',
-            priority: isFirst ? TaskPriority.high : TaskPriority.normal,
+            priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
             assignedTo: distribution.serverUid,
           );
-
-          isFirst = false;
+          isFirstTaskInAction = false; // يتم تعيينها false بعد أول مهمة
           final taskId = await _taskService.createTask(task);
           if (taskId != null) {
             createdTaskIds.add(taskId);
@@ -195,277 +181,151 @@ class TaskController {
           }
         }
       }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;
     }
   }
-
-  /// Create and distribute share tasks among servers with duration consideration
-  Future<List<String>> executeShareTask(
+   Future<List<String>> executeShareTask(
     String videoUrl,
     int numberOfShares,
   ) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
-      if (availableServers.isEmpty) {
-        throw Exception('No servers available at the moment');
-      }
+      if (availableServers.isEmpty) throw Exception('No servers available');
 
       final maxOperationsPerTask =
           await TaskCalculationService.calculateMaxShareOperations();
+      final taskSplits =
+          _splitTasksByDuration('share', numberOfShares, maxOperationsPerTask);
 
-      final taskSplits = _splitTasksByDuration(
-        'share',
-        numberOfShares,
-        maxOperationsPerTask,
-      );
-
-      final List<String> createdTaskIds = [];
-      bool isFirst = true;
-
+      final createdTaskIds = <String>[];
+      bool isFirstTaskInAction = true; // تعديل
       for (final split in taskSplits) {
-        final distributions = _distributeTasksAmongServers(
-          availableServers,
-          split.count,
-          null,
-        );
-
+        final distributions =
+            _distributeTasksAmongServers(availableServers, split.count, null);
         for (final distribution in distributions) {
           final task = Task(
-            id: '',
-            type: 'share',
+            id: '', type: 'share',
             data: {
               'videoUrl': videoUrl,
               'action': 'share',
-              'numberOfShares': distribution.count,
+              'numberOfShares': distribution.count
             },
-            createdAt: DateTime.now(),
-            status: 'pending',
-            priority: isFirst ? TaskPriority.high : TaskPriority.normal,
+            createdAt: DateTime.now(), status: 'pending',
+            priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
             assignedTo: distribution.serverUid,
           );
-
-          isFirst = false;
+          isFirstTaskInAction = false; // تعديل
           final taskId = await _taskService.createTask(task);
-          if (taskId != null) {
-            createdTaskIds.add(taskId);
-          } else {
-            throw Exception('Failed to create task');
-          }
+          if (taskId != null) createdTaskIds.add(taskId);
         }
       }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;
     }
   }
 
-  /// Create and distribute like tasks among servers
   Future<List<String>> executeLikeTask(
-    String videoUrl,
-    int numberOfLikes,
-  ) async {
+      String videoUrl, int numberOfLikes) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
-      if (availableServers.isEmpty) {
-        throw Exception('No servers available at the moment');
-      }
+      if (availableServers.isEmpty) throw Exception('No servers available');
 
-      final List<String> createdTaskIds = [];
-      final distributions = _distributeTasksAmongServers(
-        availableServers,
-        numberOfLikes,
-        8,
-      );
-
-      bool isFirst = true;
+      final createdTaskIds = <String>[];
+      final distributions =
+          _distributeTasksAmongServers(availableServers, numberOfLikes, 8);
+      
+      bool isFirstTaskInAction = true; // تعديل
       for (final distribution in distributions) {
         final task = Task(
-          id: '',
-          type: 'like',
-          data: {
-            'videoUrl': videoUrl,
-            'action': 'like',
-            'numberOfLikes': distribution.count,
-          },
-          createdAt: DateTime.now(),
-          status: 'pending',
-          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
-          assignedTo: distribution.serverUid,
-        );
-
-        isFirst = false;
+            id: '', type: 'like',
+            data: {
+              'videoUrl': videoUrl,
+              'action': 'like',
+              'numberOfLikes': distribution.count
+            },
+            createdAt: DateTime.now(), status: 'pending',
+            priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
+            assignedTo: distribution.serverUid);
+        isFirstTaskInAction = false; // تعديل
         final taskId = await _taskService.createTask(task);
-        if (taskId != null) {
-          createdTaskIds.add(taskId);
-        } else {
-          throw Exception('Failed to create task');
-        }
+        if (taskId != null) createdTaskIds.add(taskId);
       }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;
     }
   }
 
-  /// Create and distribute favorite tasks among servers
   Future<List<String>> executeFavoriteTask(
-    String videoUrl,
-    int numberOfFavorites,
-  ) async {
+      String videoUrl, int numberOfFavorites) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
-      if (availableServers.isEmpty) {
-        throw Exception('No servers available at the moment');
-      }
+      if (availableServers.isEmpty) throw Exception('No servers available');
 
-      final List<String> createdTaskIds = [];
-      final distributions = _distributeTasksAmongServers(
-        availableServers,
-        numberOfFavorites,
-        8,
-      );
-
-      bool isFirst = true;
+      final createdTaskIds = <String>[];
+      final distributions =
+          _distributeTasksAmongServers(availableServers, numberOfFavorites, 8);
+      
+      bool isFirstTaskInAction = true; // تعديل
       for (final distribution in distributions) {
         final task = Task(
-          id: '',
-          type: 'favorite',
-          data: {
-            'videoUrl': videoUrl,
-            'action': 'favorite',
-            'numberOfFavorites': distribution.count,
-          },
-          createdAt: DateTime.now(),
-          status: 'pending',
-          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
-          assignedTo: distribution.serverUid,
-        );
-
-        isFirst = false;
+            id: '', type: 'favorite',
+            data: {
+              'videoUrl': videoUrl,
+              'action': 'favorite',
+              'numberOfFavorites': distribution.count
+            },
+            createdAt: DateTime.now(), status: 'pending',
+            priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
+            assignedTo: distribution.serverUid);
+        isFirstTaskInAction = false; // تعديل
         final taskId = await _taskService.createTask(task);
-        if (taskId != null) {
-          createdTaskIds.add(taskId);
-        } else {
-          throw Exception('Failed to create task');
-        }
+        if (taskId != null) createdTaskIds.add(taskId);
       }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;
     }
   }
-
-  /// Create and distribute direct message tasks among servers
+  
   Future<List<String>> executeDirectMessageTask(
-    List<String> usernames,
-    String message,
-    int numberOfAccounts,
-  ) async {
+      List<String> usernames, String message, int numberOfAccounts) async {
     if (_isCreatingTask) return [];
-
     _isCreatingTask = true;
-
     try {
       final availableServers = await _getAllAvailableServers();
-      if (availableServers.isEmpty) {
-        throw Exception('No servers available at the moment');
-      }
+      if (availableServers.isEmpty) throw Exception('No servers available');
 
-      final List<String> createdTaskIds = [];
-      final distributions = _distributeTasksAmongServers(
-        availableServers,
-        numberOfAccounts,
-        8,
-      );
+      final createdTaskIds = <String>[];
+      final distributions =
+          _distributeTasksAmongServers(availableServers, numberOfAccounts, 8);
 
-      bool isFirst = true;
+      bool isFirstTaskInAction = true; // تعديل
       for (final distribution in distributions) {
         final task = Task(
-          id: '',
-          type: 'direct_message',
-          data: {
-            'action': 'direct_message',
-            'usernames': usernames,
-            'message': message,
-            'numberOfAccounts': distribution.count,
-          },
-          createdAt: DateTime.now(),
-          status: 'pending',
-          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
-          assignedTo: distribution.serverUid,
-        );
-
-        isFirst = false;
+            id: '', type: 'direct_message',
+            data: {
+              'action': 'direct_message',
+              'usernames': usernames,
+              'message': message,
+              'numberOfAccounts': distribution.count,
+            },
+            createdAt: DateTime.now(), status: 'pending',
+            priority: isFirstTaskInAction ? TaskPriority.high : TaskPriority.normal,
+            assignedTo: distribution.serverUid);
+        isFirstTaskInAction = false; // تعديل
         final taskId = await _taskService.createTask(task);
-        if (taskId != null) {
-          createdTaskIds.add(taskId);
-        } else {
-          throw Exception('Failed to create task');
-        }
+        if (taskId != null) createdTaskIds.add(taskId);
       }
-
-      return createdTaskIds;
-    } finally {
-      _isCreatingTask = false;
-    }
-  }
-
-  /// Create simple URL-based tasks for all available servers
-  Future<List<String>> executeTaskWithUrl(
-    String taskType,
-    String videoUrl,
-  ) async {
-    if (_isCreatingTask) return [];
-
-    _isCreatingTask = true;
-
-    try {
-      final availableServers = await _getAllAvailableServers();
-      if (availableServers.isEmpty) {
-        throw Exception('No servers available at the moment');
-      }
-
-      final List<String> createdTaskIds = [];
-      bool isFirst = true;
-
-      for (final serverUid in availableServers) {
-        final task = Task(
-          id: '',
-          type: taskType,
-          data: {'videoUrl': videoUrl, 'action': taskType},
-          createdAt: DateTime.now(),
-          status: 'pending',
-          priority: isFirst ? TaskPriority.high : TaskPriority.normal,
-          assignedTo: serverUid,
-        );
-
-        isFirst = false;
-        final taskId = await _taskService.createTask(task);
-        if (taskId != null) {
-          createdTaskIds.add(taskId);
-        } else {
-          throw Exception('Failed to create task');
-        }
-      }
-
       return createdTaskIds;
     } finally {
       _isCreatingTask = false;

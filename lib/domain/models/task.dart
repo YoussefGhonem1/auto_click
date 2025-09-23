@@ -10,7 +10,7 @@ class Task {
   final String status;
   final String? assignedTo;
   final double progress;
-  final bool inProgress;
+  // final bool inProgress; // تم حذف هذا الحقل
   final TaskPriority priority;
 
   const Task({
@@ -21,7 +21,7 @@ class Task {
     this.status = 'pending',
     this.assignedTo,
     this.progress = 0,
-    this.inProgress = false,
+    // this.inProgress = false, // تم الحذف
     this.priority = TaskPriority.high,
   });
 
@@ -35,59 +35,55 @@ class Task {
       'status': status,
       'assignedTo': assignedTo,
       'progress': progress,
-      'inProgress': inProgress,
+      // 'inProgress': inProgress, // تم الحذف
       'priority': priority.name,
     };
   }
 
-
-factory Task.fromMap(Map<String, dynamic> map, String documentId) {
-  // This is a robust helper function to safely parse timestamps.
-  DateTime _parseTimestamp(dynamic value) {
-    if (value == null) {
-      return DateTime.now(); // Fallback if createdAt is missing.
+  factory Task.fromMap(Map<String, dynamic> map, String documentId) {
+    DateTime _parseTimestamp(dynamic value) {
+      if (value == null) {
+        return DateTime.now();
+      }
+      if (value is Timestamp) {
+        return value.toDate();
+      } else if (value is String) {
+        try {
+          return DateTime.parse(value);
+        } catch (e) {
+          print('Error parsing date string: $value. Error: $e');
+          return DateTime.now();
+        }
+      }
+      return DateTime.now();
     }
-    if (value is Timestamp) {
-      // Handles new data stored correctly as a Timestamp.
-      return value.toDate();
-    } else if (value is String) {
-      // Handles old data stored as a String.
-      try {
-        return DateTime.parse(value);
-      } catch (e) {
-        print('Error parsing date string: $value. Error: $e');
-        return DateTime.now(); // Fallback if parsing fails.
+
+    return Task(
+      id: documentId,
+      type: map['type'] as String? ?? '',
+      data: Map<String, dynamic>.from(map['data'] ?? {}),
+      createdAt: _parseTimestamp(map['createdAt']),
+      status: map['status'] as String? ?? 'pending',
+      assignedTo: map['assignedTo'] as String?,
+      progress: (map['progress'] as num?)?.toDouble() ?? 0.0,
+      // inProgress: map['inProgress'] as bool? ?? false, // تم الحذف
+      priority: _parsePriority(map['priority']),
+    );
+  }
+
+  static TaskPriority _parsePriority(dynamic value) {
+    if (value is String) {
+      switch (value.toLowerCase()) {
+        case 'normal':
+          return TaskPriority.normal;
+        case 'high':
+        default:
+          return TaskPriority.high;
       }
     }
-    // Fallback for any other unexpected type.
-    return DateTime.now();
+    return TaskPriority.high;
   }
 
-  return Task(
-    id: documentId,
-    type: map['type'] as String? ?? '',
-    data: Map<String, dynamic>.from(map['data'] ?? {}),
-    createdAt: _parseTimestamp(map['createdAt']), // Use the robust helper
-    status: map['status'] as String? ?? 'pending',
-    assignedTo: map['assignedTo'] as String?,
-    progress: (map['progress'] as num?)?.toDouble() ?? 0.0,
-    inProgress: map['inProgress'] as bool? ?? false,
-    priority: _parsePriority(map['priority']),
-  );
-}
-
-static TaskPriority _parsePriority(dynamic value) {
-  if (value is String) {
-    switch (value.toLowerCase()) {
-      case 'normal':
-        return TaskPriority.normal;
-      case 'high':
-      default:
-        return TaskPriority.high;
-    }
-  }
-  return TaskPriority.high;
-}
   Task copyWith({
     String? id,
     String? type,
@@ -96,7 +92,7 @@ static TaskPriority _parsePriority(dynamic value) {
     String? status,
     String? assignedTo,
     double? progress,
-    bool? inProgress,
+    // bool? inProgress, // تم الحذف
     TaskPriority? priority,
   }) {
     return Task(
@@ -107,7 +103,7 @@ static TaskPriority _parsePriority(dynamic value) {
       status: status ?? this.status,
       assignedTo: assignedTo ?? this.assignedTo,
       progress: progress ?? this.progress,
-      inProgress: inProgress ?? this.inProgress,
+      // inProgress: inProgress ?? this.inProgress, // تم الحذف
       priority: priority ?? this.priority,
     );
   }
@@ -122,8 +118,7 @@ static TaskPriority _parsePriority(dynamic value) {
           createdAt == other.createdAt &&
           status == other.status &&
           assignedTo == other.assignedTo &&
-          progress == other.progress &&
-          inProgress == other.inProgress;
+          progress == other.progress;
 
   @override
   int get hashCode =>
@@ -133,11 +128,10 @@ static TaskPriority _parsePriority(dynamic value) {
       status.hashCode ^
       assignedTo.hashCode ^
       progress.hashCode ^
-      inProgress.hashCode ^
       priority.hashCode;
 
   @override
   String toString() {
-    return 'Task{id: $id, type: $type, createdAt: $createdAt, status: $status, assignedTo: $assignedTo, progress: $progress, inProgress: $inProgress, priority: $priority}';
+    return 'Task{id: $id, type: $type, createdAt: $createdAt, status: $status, assignedTo: $assignedTo, progress: $progress, priority: $priority}';
   }
 }
