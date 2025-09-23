@@ -15,6 +15,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.TextView
+import io.flutter.plugin.common.MethodChannel
+
 
 class AutoClickAccessibilityService : AccessibilityService() {
 
@@ -36,7 +38,8 @@ class AutoClickAccessibilityService : AccessibilityService() {
     private var terminationOverlayView: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isEventSequenceRunning = false
-    private var completionCallback: ((Boolean) -> Unit)? = null
+    private var methodResult: MethodChannel.Result? = null
+
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -742,62 +745,42 @@ class AutoClickAccessibilityService : AccessibilityService() {
         Log.d(TAG, "Click gesture dispatched: ${if (result) "SUCCESS" else "FAILED"}")
         return result
     }
-
-    fun executeEventSequence(events: List<Map<String, Any>>): Boolean {
+   
+     fun executeEventSequence(events: List<Map<String, Any>>, result: MethodChannel.Result): Boolean {
         try {
             if (isEventSequenceRunning) {
-                Log.w(TAG, "Event sequence already running, cancelling previous sequence")
-                cancelEventSequence()
+                Log.w(TAG, "Event sequence already running, cancelling previous one")
+                cancelEventSequence() // ستلغي المهمة القديمة وتخبر Dart بفشلها
             }
 
-            Log.d(TAG, "Starting event sequence execution with ${events.size} events")
+            Log.d(TAG, "Starting event sequence with ${events.size} events")
             isEventSequenceRunning = true
+            methodResult = result // احتفظ بالـ result لإرسال الرد لاحقًا
             executeEventSequenceAsync(events, 0)
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Error executing event sequence: ${e.message}")
+            Log.e(TAG, "Error starting event sequence: ${e.message}")
             isEventSequenceRunning = false
+            methodResult = null
             return false
         }
-    }
-
-    fun executeEventSequenceWithCallback(
-            events: List<Map<String, Any>>,
-            callback: (Boolean) -> Unit
-    ): Boolean {
-        try {
-            if (isEventSequenceRunning) {
-                Log.w(TAG, "Event sequence already running, cancelling previous sequence")
-                cancelEventSequence()
-            }
-
-            Log.d(TAG, "Starting event sequence execution with ${events.size} events")
-            isEventSequenceRunning = true
-            completionCallback = callback
-            executeEventSequenceAsync(events, 0)
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error executing event sequence: ${e.message}")
-            isEventSequenceRunning = false
-            callback(false)
-            return false
-        }
-    }
+    }  
 
     private fun executeEventSequenceAsync(events: List<Map<String, Any>>, currentIndex: Int) {
-        if (!isEventSequenceRunning) {
+            if (!isEventSequenceRunning) {
             Log.d(TAG, "Event sequence was cancelled, stopping execution")
-            completionCallback?.invoke(false)
+            methodResult?.success(false) 
+            methodResult = null
             return
         }
 
         if (currentIndex >= events.size) {
             Log.d(TAG, "Event sequence completed successfully")
             isEventSequenceRunning = false
-            completionCallback?.invoke(true)
+            methodResult?.success(true)
+            methodResult = null
             return
         }
-
         val event = events[currentIndex]
         Log.d(TAG, "Executing event $currentIndex: $event")
 
@@ -1041,8 +1024,8 @@ class AutoClickAccessibilityService : AccessibilityService() {
             Log.d(TAG, "Cancelling ongoing event sequence")
             isEventSequenceRunning = false
             handler.removeCallbacksAndMessages(null)
-            completionCallback?.invoke(false)
-            completionCallback = null
+            methodResult?.success(false)
+            methodResult = null
         }
     }
 

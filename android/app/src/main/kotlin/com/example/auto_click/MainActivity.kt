@@ -105,14 +105,11 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_ARGUMENT", "Comment text is required", null)
                     }
                 }
-                "executeEventSequence" -> {
+                  "executeEventSequence" -> {
                     val events = call.argument<List<Map<String, Any>>>("events")
                     if (events != null) {
-                        val success = executeEventSequenceWithCallback(events) { completed ->
-                            // The callback will be called when the sequence is actually completed
-                            result.success(completed)
-                        }
-                        if (!success) {
+                        val started = executeEventSequence(events, result)
+                        if (!started) {
                             result.error("EXECUTION_FAILED", "Failed to start event sequence", null)
                         }
                     } else {
@@ -211,15 +208,11 @@ class MainActivity : FlutterActivity() {
         return service?.performCommentAction(commentText) ?: false
     }
 
-    private fun executeEventSequence(events: List<Map<String, Any>>): Boolean {
+     private fun executeEventSequence(events: List<Map<String, Any>>, result: MethodChannel.Result): Boolean {
         val service = AutoClickAccessibilityService.getInstance()
-        return service?.executeEventSequence(events) ?: false
+        return service?.executeEventSequence(events, result) ?: false
     }
 
-    private fun executeEventSequenceWithCallback(events: List<Map<String, Any>>, callback: (Boolean) -> Unit): Boolean {
-        val service = AutoClickAccessibilityService.getInstance()
-        return service?.executeEventSequenceWithCallback(events, callback) ?: false
-    }
 
     private fun cancelEventSequence(): Boolean {
         val service = AutoClickAccessibilityService.getInstance()
