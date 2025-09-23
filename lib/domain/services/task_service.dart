@@ -115,7 +115,25 @@ class TaskService {
       return false;
     }
   }
+ Future<bool> updateTask(String taskId, {String? status, TaskPriority? priority}) async {
+    try {
+      final Map<String, dynamic> dataToUpdate = {};
+      if (status != null) {
+        dataToUpdate['status'] = status;
+      }
+      if (priority != null) {
+        dataToUpdate['priority'] = priority.name;
+      }
 
+      if (dataToUpdate.isNotEmpty) {
+        await _firestore.collection(_tasksCollection).doc(taskId).update(dataToUpdate);
+      }
+      return true;
+    } catch (e) {
+      print('Failed to update task $taskId: $e');
+      return false;
+    }
+  }
   // Delete task
   Future<bool> deleteTask(String taskId) async {
     try {

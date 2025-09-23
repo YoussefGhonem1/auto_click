@@ -103,209 +103,228 @@ class TaskExecutionController extends ChangeNotifier {
     }
   }
 
-  Future<void> processTaskQueue(List<Task> tasks) async {
-    if (!_isExecutingTasks || isCurrentlyExecuting) return;
+////////////////////////////////////////////////////////////////
 
-    final executableTasks = _filterAndSortTasks(tasks);
-    if (executableTasks.isEmpty) {
-      _updateExecutionStatus('No tasks to execute');
-      return;
-    }
+  List<Task> _planNextExecutionBatch(List<Task> availableTasks) {
+    final executable = availableTasks
+        .where((t) => t.status.toLowerCase() == 'pending' || t.status.toLowerCase() == 'assigned')
+        .toList();
 
-    await _executeTaskQueue(executableTasks);
-  }
+    if (executable.isEmpty) return [];
 
-  List<Task> _filterAndSortTasks(List<Task> tasks) {
-    return tasks
-        .where((task) =>
-            (task.status.toLowerCase() == 'assigned' || task.status.toLowerCase() == 'pending'))
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt)); // Oldest first is correct
-  }
+    final highPriorityTasks = executable
+        .where((t) => t.priority == TaskPriority.high)
+        .toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
-  /// Decide the next best execution batch (one task or a pair) based on priority rules
-  List<Task> _planNextExecutionBatch(List<Task> available) {
-    if (available.isEmpty) return const [];
-
-    // Separate by priority
-    final List<Task> highPriorityTasks = available
-        .where((t) => (t.status.toLowerCase() == 'pending' || t.status.toLowerCase() == 'assigned') && t.priority == TaskPriority.high)
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-
-    final List<Task> normalPriorityTasks = available
-        .where((t) => (t.status.toLowerCase() == 'pending' || t.status.toLowerCase() == 'assigned') && t.priority == TaskPriority.normal)
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-
-    // Helper to find first combinable pair in a list (different videoUrl, type watch)
-    List<Task> _findPair(List<Task> list) {
-      for (int i = 0; i < list.length; i++) {
-        final a = list[i];
-        if (a.type != 'watch') continue;
-        final aUrl = a.data['videoUrl'];
-        for (int j = i + 1; j < list.length; j++) {
-          final b = list[j];
-          if (b.type != 'watch') continue;
-          final bUrl = b.data['videoUrl'];
-          if (aUrl != null && bUrl != null && aUrl != bUrl) {
+    final normalPriorityTasks = executable
+        .where((t) => t.priority == TaskPriority.normal)
+        .toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        
+    List<Task> _findCombinablePair(List<Task> list1, [List<Task>? list2]) {
+      final searchList = list2 ?? list1;
+      for (int i = 0; i < list1.length; i++) {
+        final a = list1[i];
+        if (a.type != 'watch' || a.data['videoUrl'] == null) continue;
+        
+        final startIndex = (list1 == searchList) ? i + 1 : 0;
+        for (int j = startIndex; j < searchList.length; j++) {
+          final b = searchList[j];
+          if (b.type != 'watch' || b.data['videoUrl'] == null) continue;
+          
+          if (a.data['videoUrl'] != b.data['videoUrl']) {
             return [a, b];
           }
         }
       }
-      return const [];
+      return [];
     }
 
-    // Case A: 2+ high-priority tasks → try to combine within the list
+    // --- بداية المنطق الاستراتيجي ---
+
+    // الحالة (أ): هناك مهمتان عاجلتان أو أكثر
     if (highPriorityTasks.length >= 2) {
-      final pair = _findPair(highPriorityTasks);
+      final pair = _findCombinablePair(highPriorityTasks);
       if (pair.isNotEmpty) return pair;
     }
 
-    // Case B: exactly 1 high-priority → try to pair with normal, else single
-    if (highPriorityTasks.length == 1) {
-      final hp = highPriorityTasks.first;
-      if (hp.type == 'watch') {
-        final hpUrl = hp.data['videoUrl'];
-        for (final np in normalPriorityTasks) {
-          if (np.type == 'watch' && np.data['videoUrl'] != null && np.data['videoUrl'] != hpUrl) {
-            return [hp, np];
-          }
+    // الحالة (ب): هناك مهمة عاجلة واحدة فقط
+    if (highPriorityTasks.isNotEmpty) {
+      final hpTask = highPriorityTasks.first;
+      final pair = _findCombinablePair([hpTask], normalPriorityTasks);
+      if (pair.isNotEmpty) return pair; // دمج (عاجل + عادي)
+      return [hpTask]; // تنفيذ المهمة العاجلة بمفردها
+    }
+
+    // الحالة (ج): لا توجد أي مهام عاجلة - **استخدام المنطق الجديد القوي**
+    if (normalPriorityTasks.isNotEmpty) {
+        // 1. تجميع المهام حسب رابط الفيديو
+        final tasksByUrl = <String, List<Task>>{};
+        for (final task in normalPriorityTasks) {
+            final url = task.data['videoUrl'];
+            if (url != null && url is String) {
+                (tasksByUrl[url] ??= []).add(task);
+            }
         }
-      }
-      return [hp];
+
+        // 2. اتخاذ القرار بناءً على عدد المجموعات
+        if (tasksByUrl.keys.length >= 2) {
+            // هناك فيديوهات مختلفة، قم بالدمج
+            final firstVideoTasks = tasksByUrl.values.first;
+            final secondVideoTasks = tasksByUrl.values.elementAt(1);
+            return [firstVideoTasks.first, secondVideoTasks.first];
+        } else if (tasksByUrl.isNotEmpty) {
+            // كل المهام المتبقية لنفس الفيديو، نفذ أقدم واحدة
+            return [tasksByUrl.values.first.first];
+        }
     }
 
-    // Case C: no high-priority → try to combine within normal, else single oldest
-    if (highPriorityTasks.isEmpty && normalPriorityTasks.isNotEmpty) {
-      final pair = _findPair(normalPriorityTasks);
-      if (pair.isNotEmpty) return pair;
-      return [normalPriorityTasks.first];
-    }
-
-    // Case D: nothing to do
-    return const [];
+    // الحالة (د): لا يوجد شيء لتنفيذه
+    return [];
   }
 
-  /// **(FINAL & CORRECTED)** Executes the queue with the new "Smart Swap" combination logic.
-  Future<void> _executeTaskQueue(List<Task> tasks) async {
+
+  /// **(جديد ومبسط)**
+  // في ملف: lib/presentation/controllers/task_execution_controller.dart
+
+  /// **(مُعدلة)**: لم تعد تستقبل قائمة مهام، بل تبدأ العملية فقط.
+  Future<void> processTaskQueue() async {
+    // هذه الدالة الآن وظيفتها فقط بدء حلقة التنفيذ
+    if (!_isExecutingTasks || isCurrentlyExecuting) return;
+    await _executeTaskQueue();
+  }
+
+  /// **(النسخة النهائية والمصححة)**
+  /// حلقة التنفيذ الرئيسية: تجلب أحدث المهام في كل دورة لتجنب مشكلة البيانات القديمة.
+  Future<void> _executeTaskQueue() async {
     _executionCompleter = Completer<void>();
     _tasksExecutedCount = 0;
     _tasksFailedCount = 0;
+
     try {
-      final workingTasks = List<Task>.from(tasks);
+      // الحلقة تستمر طالما أن المنفذ في وضع التشغيل
+      while (_isExecutingTasks) {
+        // --- التعديل الجوهري ---
+        // 1. احصل على أحدث قائمة مهام من قاعدة البيانات في بداية كل دورة
+        final currentTasks = await _taskService.getAllTasks();
 
-      while (workingTasks.isNotEmpty && _isExecutingTasks) {
-        final plan = _planNextExecutionBatch(workingTasks);
-        if (plan.isEmpty) break;
+        // تحقق مرة أخرى بعد استدعاء الشبكة الطويل، فقد يكون المستخدم أوقف التنفيذ
+        if (!_isExecutingTasks) break;
 
-        final primary = plan.first;
-        final partner = plan.length > 1 ? plan[1] : null;
+        // 2. خطط للخطوة التالية بناءً على أحدث البيانات
+        final batchToExecute = _planNextExecutionBatch(currentTasks);
 
-        final success = await _executeSingleTaskWithRetry(primary, partner);
+        // إذا لم يكن هناك مهام مناسبة حاليًا
+        if (batchToExecute.isEmpty) {
+          _updateExecutionStatus('No suitable tasks to execute, waiting...');
+          // انتظر قليلاً ثم ابدأ دورة جديدة للبحث عن مهام مرة أخرى
+          await Future.delayed(const Duration(seconds: 5)); 
+          continue; // يعود إلى بداية الـ while loop
+        }
 
+        // 3. تنفيذ خطة العمل
+        final success = await _executeBatchWithRetry(batchToExecute);
+        
+        // 4. تحديث حالة المهام بعد التنفيذ
         if (success) {
-          await _handleTaskSuccess(primary, partner);
+          await _handleBatchSuccess(batchToExecute);
         } else {
-          await _handleTaskFailure(primary, partner);
+          await _handleBatchFailure(batchToExecute);
         }
-
-        // Remove executed tasks from working list
-        workingTasks.removeWhere((t) =>
-            t.id == primary.id || (partner != null && t.id == partner.id));
-
-        if (workingTasks.isNotEmpty && _isExecutingTasks) {
-          await _delayBetweenTasks();
-        }
+        
+        // لم نعد بحاجة لإزالة المهام يدويًا من قائمة محلية
+        // فالدورة التالية ستحصل على قائمة جديدة ونظيفة من قاعدة البيانات
+        
+        await _delayBetweenTasks();
       }
-    } catch (e) {
+    } catch (e, s) {
+      debugPrint('Queue execution error: $e\n$s');
       await _handleQueueExecutionError(e);
     } finally {
-      _currentExecutingTask = null;
+      _currentExecutingTask = null; // تأكد من إعادة تعيين المهمة الحالية
       if (!(_executionCompleter?.isCompleted ?? true)) {
         _executionCompleter?.complete();
       }
       await _handleQueueCompletion();
     }
   }
-
-  Future<bool> _executeSingleTaskWithRetry(Task task, Task? otherTask) async {
-    _currentExecutingTask = task;
-    _updateExecutionStatus('Executing: ${_getTaskTypeText(task.type)}${otherTask != null ? ' (and another)' : ''}');
+  /// ينفذ دفعة من المهام (واحدة أو اثنتين) مع محاولات إعادة
+  Future<bool> _executeBatchWithRetry(List<Task> batch) async {
+    _currentExecutingTask = batch.first;
+    _updateExecutionStatus(
+      'Executing: ${_getTaskTypeText(batch.first.type)}'
+      '${batch.length > 1 ? ' (and another)' : ''}'
+    );
 
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
-        await updateTaskStatusSafely(task.id, 'in_progress');
-        if (otherTask != null) {
-          await updateTaskStatusSafely(otherTask.id, 'in_progress');
+        // -- تعديل مهم: تحديث الحالة والأولوية قبل البدء --
+        for (final task in batch) {
+          await _taskService.updateTask(task.id, status: 'in_progress', priority: TaskPriority.normal);
         }
+        
+        final success = await _taskExecutionService.executeTask(
+          batch.first,
+          batch.length > 1 ? batch.last : null,
+        );
 
-        final success = await _taskExecutionService.executeTask(task, otherTask);
         if (success) return true;
 
         if (attempt < 3) await _delayBeforeRetry(attempt);
+
       } catch (e) {
         debugPrint('Task execution attempt $attempt failed: $e');
       }
     }
     return false;
   }
-
-   Future<void> _handleTaskSuccess(Task task, Task? otherTask) async {
-     if (otherTask != null) {
-       // Combined execution (Smart Swap)
+  
+   /// يتعامل مع نجاح دفعة من المهام
+   Future<void> _handleBatchSuccess(List<Task> batch) async {
+     if (batch.length > 1) {
+       // حالة الدمج
+       final task1 = batch[0];
+       final task2 = batch[1];
+       
        final combinationService = TaskCombinationService();
-       final result = combinationService.calculate(task, otherTask);
+       final result = combinationService.calculate(task1, task2);
 
-       // Mark both tasks as completed
-       await updateTaskStatusSafely(task.id, 'completed');
-       await updateTaskStatusSafely(otherTask.id, 'completed');
+       await _taskService.updateTask(task1.id, status: 'completed');
+       await _taskService.updateTask(task2.id, status: 'completed');
 
-       // Create remainder task if needed
        if (result.hasRemainder && result.taskWithRemainder != null) {
          await _taskService.createRemainderTask(
            originalTask: result.taskWithRemainder!,
            remainingCount: result.remainderCount,
          );
        }
-
-       _tasksExecutedCount += 2;
-       onTaskCompleted?.call(task, true);
-       onTaskCompleted?.call(otherTask, true);
        
-       onShowMessage?.call(
-         'Smart Swap completed: ${_getTaskTypeText(task.type)} + ${_getTaskTypeText(otherTask.type)}', 
-         isError: false
-       );
+       _tasksExecutedCount += 2;
+       onTaskCompleted?.call(task1, true);
+       onTaskCompleted?.call(task2, true);
+       onShowMessage?.call('Smart Swap completed!', isError: false);
+
      } else {
-       // Single task execution
-       await updateTaskStatusSafely(task.id, 'completed');
+       // حالة المهمة المنفردة
+       final task = batch.first;
+       await _taskService.updateTask(task.id, status: 'completed');
        _tasksExecutedCount++;
        onTaskCompleted?.call(task, true);
-       
-       onShowMessage?.call(
-         'Task completed: ${_getTaskTypeText(task.type)}', 
-         isError: false
-       );
+       onShowMessage?.call('Task completed: ${_getTaskTypeText(task.type)}', isError: false);
      }
    }
 
-  Future<void> _handleTaskFailure(Task task, [Task? otherTask]) async {
-    await updateTaskStatusSafely(task.id, 'failed');
-    if (otherTask != null) {
-        await updateTaskStatusSafely(otherTask.id, 'failed');
+  /// يتعامل مع فشل دفعة من المهام
+  Future<void> _handleBatchFailure(List<Task> batch) async {
+    for (final task in batch) {
+      await _taskService.updateTask(task.id, status: 'failed');
+      _tasksFailedCount++;
+      onTaskCompleted?.call(task, false);
     }
-    _tasksFailedCount++;
-    
-    onTaskCompleted?.call(task, false);
-    if(otherTask != null) onTaskCompleted?.call(otherTask, false);
-    
     onShowMessage?.call(
-      'Task execution failed: ${_getTaskTypeText(task.type)}',
+      'Task execution failed for: ${_getTaskTypeText(batch.first.type)}',
       isError: true,
     );
   }
-  
   Future<bool> updateTaskStatusSafely(String taskId, String status) async {
     try {
       return await _taskService.updateTaskStatus(taskId, status);
@@ -319,6 +338,9 @@ class TaskExecutionController extends ChangeNotifier {
     _executionStatus = status;
     notifyListeners();
   }
+
+
+
 
   Future<void> _delayBetweenTasks() async {
     await Future.delayed(const Duration(milliseconds: 1500));
@@ -341,6 +363,8 @@ class TaskExecutionController extends ChangeNotifier {
     _updateExecutionStatus('Error executing tasks');
     onShowMessage?.call('Error executing tasks: ${error.toString()}', isError: true);
   }
+
+
 
   String _getTaskTypeText(String type) {
     switch (type.toLowerCase()) {

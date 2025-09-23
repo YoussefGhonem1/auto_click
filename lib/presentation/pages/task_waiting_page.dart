@@ -57,7 +57,7 @@ class _TaskWaitingPageState extends State<TaskWaitingPage>
     SystemChannels.lifecycle.setMessageHandler((message) async {
       if (message == 'AppLifecycleState.resumed') {
         await Future.delayed(const Duration(milliseconds: 10000), () async {
-          await _executionController.processTaskQueue(_tasks);
+_executionController.processTaskQueue();
         });
       }
       if (message == 'AppLifecycleState.paused' ||
@@ -124,7 +124,7 @@ class _TaskWaitingPageState extends State<TaskWaitingPage>
           !_executionController.isCurrentlyExecuting) {
         final sortedTasks = _streamManager.sortTasksByCreationDate(tasks);
 
-        await _executionController.processTaskQueue(sortedTasks);
+_executionController.processTaskQueue();
       }
       _cleanupManager.cleanupCompletedTasks(tasks);
     };
@@ -156,7 +156,7 @@ class _TaskWaitingPageState extends State<TaskWaitingPage>
         final sortedTasks = _streamManager.sortTasksByCreationDate(
           currentTasks,
         );
-        await _executionController.processTaskQueue(sortedTasks);
+_executionController.processTaskQueue();
       }
     } catch (e) {
       _showMessage(
